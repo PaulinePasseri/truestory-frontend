@@ -33,103 +33,89 @@ const avatars = [
   "https://res.cloudinary.com/dxgix5q4e/image/upload/v1747751159/ninja_hyowdl.png",
 ];
 
-export default function CreateProfileScreen({ navigation, route }) {
+export default function CreateProfileScreen({ route }) {
   const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
-
   const [pseudo, setPseudo] = useState("");
-  const [avatar, setAvatar] = useState(null);
-  const [image, setImage] = useState(null);
-  const [invalidProfile, setInvalidProfile] = useState(false);
   const [avatarSelected, setAvatarSelected] = useState(null);
+  const [base64Image, setBase64Image] = useState(null);
+  const [imagePreview, setImagePreview] = useState(null);
+  const [invalidProfile, setInvalidProfile] = useState(false);
   const [loading, setLoading] = useState(false);
 
   const token = route.params.token;
   const dispatch = useDispatch();
 
   const pickImage = async () => {
-    setAvatar(null);
-    setAvatarSelected(null);
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!permission.granted) {
       alert("Permission requise pour accéder à la galerie.");
       return;
     }
+
     const result = await ImagePicker.launchImageLibraryAsync({
       allowsEditing: true,
       aspect: [1, 1],
-      quality: 0.3,
+      quality: 0.4,
       base64: true,
-      selectionLimit: 1,
     });
 
     if (!result.canceled && result.assets.length > 0) {
       const selected = result.assets[0];
-      setImage(selected.uri);
+      setAvatarSelected(null); // remove avatar selection
+      setBase64Image(`data:image/jpeg;base64,${selected.base64}`);
+      setImagePreview(selected.uri);
     }
   };
 
-  const pickAvatar = (selectedAvatar) => {
-    setAvatar(selectedAvatar);
-    setImage(selectedAvatar);
-    setAvatarSelected(selectedAvatar);
+  const pickAvatar = (url) => {
+    setAvatarSelected(url);
+    setBase64Image(null);
+    setImagePreview(url);
   };
 
   const handleCreateProfile = () => {
-    if (!pseudo) {
+    if (!pseudo || (!base64Image && !avatarSelected)) {
       setInvalidProfile(true);
       return;
     }
-    
-    if (!image && !avatarSelected) {
-      setInvalidProfile(true);
-      return;
-    }
-  
+
     setLoading(true);
-    setInvalidProfile(false); 
-    
-    const formData = new FormData();
-    formData.append("token", token);
-    formData.append("nickname", pseudo);
-  
-    // Si une image personnalisée a été sélectionnée (pas un avatar prédéfini)
-    if (image && !avatarSelected) {
-      formData.append("photoFromFront", {
-        uri: image,
-        name: "photo.jpg",
-        type: "image/jpeg",
-      });
-    } 
-    // Si un avatar prédéfini a été sélectionné
-    else if (avatarSelected) {
-      formData.append("avatarUrl", avatarSelected);
-    }
-  
+    setInvalidProfile(false);
+
+    const body = {
+      token,
+      nickname: pseudo,
+      ...(avatarSelected && { avatarUrl: avatarSelected }),
+      ...(base64Image && { base64Image }),
+    };
+
     fetch(`${BACKEND_URL}/users/profile`, {
       method: "PUT",
-      body: formData,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
     })
-      .then((response) => response.json())
+      .then((res) => res.json())
       .then((data) => {
         setLoading(false);
         if (data.result) {
           dispatch(updateToken(token));
           dispatch(updateAvatar(data.url));
           dispatch(updateNickname(pseudo));
-          setImage(null);
-          setAvatar(null);
-          setPseudo("");
-          setInvalidProfile(false);
         } else {
-          console.log("Failed to create profile :", data.error);
           setInvalidProfile(true);
         }
       })
+      .catch((err) => {
+        setLoading(false);
+        setInvalidProfile(true);
+        console.log("Erreur :", err);
+      });
   };
 
   return (
     <SafeAreaView style={styles.container}>
       <Text style={styles.title}>Créez votre profil</Text>
+
       <TextInput
         style={styles.input}
         placeholder="Pseudo"
@@ -137,59 +123,59 @@ export default function CreateProfileScreen({ navigation, route }) {
         value={pseudo}
         onChangeText={(text) => setPseudo(text)}
       />
-      <Text style={{fontFamily: "NotoSans_400Regular"}}>Importez une image de votre galerie</Text>
-      {image ? (
-        <TouchableOpacity onPress={pickImage}>
-          <Image source={{ uri: image }} style={styles.image} />
-          <View style={styles.editIcon}>
-            <FontAwesome5 name="edit" size={16} color="#EADDFF" />
-          </View>
-        </TouchableOpacity>
-      ) : (
-        <TouchableOpacity onPress={pickImage} style={{ position: "relative" }}>
-          <Image
-            source={require("../assets/emptyAvatar.png")}
-            style={styles.image}
-          />
-          <View style={styles.editIcon}>
-            <FontAwesome5 name="edit" size={16} color="#EADDFF" />
-          </View>
-        </TouchableOpacity>
-      )}
+
+      <Text style={styles.text}>Importez une image</Text>
+
+      <TouchableOpacity onPress={pickImage} style={{ position: "relative" }}>
+        <Image
+          source={
+            imagePreview
+              ? { uri: imagePreview }
+              : require("../assets/emptyAvatar.png")
+          }
+          style={styles.image}
+        />
+        <View style={styles.editIcon}>
+          <FontAwesome5 name="edit" size={16} color="#EADDFF" />
+        </View>
+      </TouchableOpacity>
 
       <Text style={styles.text}>Ou choisissez un avatar</Text>
       <View style={styles.avatarContainer}>
-        {avatars.map((avatar, index) => (
-          <Pressable key={index} onPress={() => pickAvatar(avatar)}>
+        {avatars.map((url, index) => (
+          <Pressable key={index} onPress={() => pickAvatar(url)}>
             <Image
-              source={{ uri: avatar }}
+              source={{ uri: url }}
               style={{
                 width: 60,
                 height: 60,
                 borderRadius: 50,
                 margin: 8,
-                borderWidth: avatar === avatarSelected ? 3 : 0,
+                borderWidth: url === avatarSelected ? 3 : 0,
                 borderColor: "#65558F",
               }}
             />
           </Pressable>
         ))}
       </View>
+
       <TouchableOpacity
-        onPress={() => handleCreateProfile()}
+        onPress={handleCreateProfile}
         style={styles.button}
         activeOpacity={0.8}
       >
         <Text style={styles.buttonText}>Créer</Text>
       </TouchableOpacity>
-      {invalidProfile ? (
-  <Text style={{ color: "red", textAlign: "center", marginTop: 10 }}>
-    Veuillez choisir un pseudo et une image/avatar
-  </Text>
-) : null}
-      {loading ? (
+
+      {invalidProfile && (
+        <Text style={{ color: "red", textAlign: "center", marginTop: 10 }}>
+          Veuillez choisir un pseudo et une image/avatar
+        </Text>
+      )}
+
+      {loading && (
         <Text style={{ marginTop: 10, color: "#65558F" }}>Chargement...</Text>
-      ) : null}
+      )}
     </SafeAreaView>
   );
 }
